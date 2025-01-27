@@ -1,0 +1,94 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: "wolfeidau: API running in AWS Lambda"
+Parameters:
+  AppName:
+    Type: String
+    Description: Application Name used to store configuration.
+  Stage:
+    Type: String
+    Description: The stage where the application is running in, e.g., dev, prod.
+    Default: dev
+  Branch:
+    Type: String
+    Default: main
+  RetentionInDays:
+    Description:
+      Retain the assets uploaded to the deployment bucket for this many
+      days.
+    Type: Number
+    Default: 7
+  ContainerImageUri:
+    Description: The container image URI which hosts the images.
+    Type: String
+  HoneycombApiKey:
+    Description: The honeycomb api key
+    NoEcho: true
+    Type: String
+  HoneycombDataset:
+    Description: The honeycomb dataset
+    Type: String
+  HoneycombEndpoint:
+    Description: The honeycomb endpoint
+    Type: String
+    Default: "api.honeycomb.io"
+
+Outputs:
+  HttpAPIURL:
+    Description: "API Gateway endpoint URL for web api"
+    Value: !Sub "https://${HttpAPI}.execute-api.${AWS::Region}.${AWS::URLSuffix}/"
+
+Globals:
+  Function:
+    Timeout: 30
+    MemorySize: 256
+    Environment:
+      Variables:
+        APP_NAME: !Ref AppName
+        STAGE: !Ref Stage
+        BRANCH: !Ref Branch
+
+Resources:
+  HTTPAPIAccessLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/apigateway-v2/AccessLog-${AppName}-${Stage}-${Branch}"
+      RetentionInDays: !Ref RetentionInDays
+
+  HttpAPI:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      FailOnWarnings: True
+      DefaultRouteSettings:
+        ThrottlingBurstLimit: 10
+        ThrottlingRateLimit: 5
+        DetailedMetricsEnabled: true
+      AccessLogSettings:
+        DestinationArn: !GetAtt HTTPAPIAccessLogGroup.Arn
+        Format: '{"requestId":"$context.requestId","domainName":"$context.domainName","httpMethod":"$context.httpMethod","identitySourceIp":"$context.identity.sourceIp","path":"$context.path","protocol":"$context.protocol","requestTime":"$context.requestTime","status":"$context.status","responseLength":"$context.responseLength","responseLatency":"$context.responseLatency","integrationLatency":"$context.integrationLatency","authorizerError":"$context.authorizer.error","integrationErrorMessage":"$context.integrationErrorMessage","errorMessage":"$context.error.message","errorResponseType":"$context.error.responseType"}'
+
+  APILambdaLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${APILambda}"
+      RetentionInDays: !Ref RetentionInDays
+
+  APILambda:
+    Type: AWS::Serverless::Function
+    Properties:
+      PackageType: Image
+      Events:
+        ApiCall:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpAPI
+      ImageUri: !Ref ContainerImageUri
+      ImageConfig:
+        Command: ['lambda']
+      Environment:
+        Variables:
+          HONEYCOMB_API_KEY: !Ref HoneycombApiKey
+          HONEYCOMB_DATASET: !Ref HoneycombDataset
+          HONEYCOMB_ENDPOINT: !Ref HoneycombEndpoint
+      Architectures:
+        - arm64
